@@ -1,0 +1,295 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+ 
+}
+        
+
+// schema.prisma - FIXED VERSION
+model User {
+  id              String        @id @default(cuid())
+  email           String        @unique
+  name            String
+  phone           String?
+  upiVpa          String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // MANY-TO-MANY via ProjectTeam
+  projectTeams    ProjectTeam[]
+  
+  // Direct relations (optional primary owner)
+  ownedProjects   Project[]     @relation("ProjectOwner")
+  
+  // Workers create DPRs
+  dailyProgressReports DailyProgressReport[]
+
+  @@map("users")
+}
+
+model Project {
+  id               String              @id @default(cuid())
+  name             String
+  code             String              @unique
+  blueprintUrl     String?
+  baselinePhotos   String[]
+  boqTotalQuantity Float
+  deadline         DateTime
+  currentProgress  Float               @default(0)
+  predictedDelay   Float?
+  riskLevel        RiskLevel           @default(LOW)
+  approvedMaterials Json?
+
+  // Owner (optional, single primary owner)
+  ownerId          String?
+  owner            User?               @relation("ProjectOwner", fields: [ownerId], references: [id])
+
+  // MANY-TO-MANY Team members
+  projectTeams     ProjectTeam[]
+
+  // All project data
+  dprs             DailyProgressReport[]
+  gangs            Gang[]
+  attendances      Attendance[]
+  paymentBatches   PaymentBatch[]
+  materialRequests MaterialRequest[]
+  alerts           Alert[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("projects")
+}
+
+model ProjectTeam {
+  id        String      @id @default(cuid())
+  userId    String
+  projectId String
+  role      ProjectRole @default(ENGINEER)
+  
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime    @default(now())
+
+  @@unique([userId, projectId])
+  @@map("project_teams")
+}
+
+model DailyProgressReport {
+  id               String   @id @default(cuid())
+  projectId        String
+  engineerId       String
+  reportDate       DateTime
+  workDescription  String
+  aiProgress       Float
+  aiConfidence     Float
+  engineerProgress Float?
+  engineerNotes    String?
+  photos           String[]
+  status           DprStatus @default(PENDING)
+  verificationScore Float  @default(0)
+  quantityCompleted Float?
+  unit             String?
+  materialsUsed    Json?
+
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  engineer         User     @relation(fields: [engineerId], references: [id])
+  
+  gangDprs         GangDpr[]
+  wageLines        WageLine[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("daily_progress_reports")
+}
+
+model Gang {
+  id        String   @id @default(cuid())
+  projectId String
+  name      String
+  createdAt DateTime @default(now())
+
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workers   Worker[]
+  dprs      GangDpr[]
+
+  @@unique([projectId, name])
+  @@map("gangs")
+}
+
+model Worker {
+  id        String      @id @default(cuid())
+  name      String
+  phone     String      @unique
+  upiVpa    String?
+  skill     String
+
+  gangId    String?
+  gang      Gang?       @relation(fields: [gangId], references: [id])
+
+  attendances Attendance[]
+  wages      WageLine[]
+
+  createdAt DateTime    @default(now())
+  @@map("workers")
+}
+
+model Attendance {
+  id        String        @id @default(cuid())
+  workerId  String
+  projectId String
+  checkIn   DateTime
+  checkOut  DateTime?
+  gpsLat    Float
+  gpsLon    Float
+  mode      AttendanceMode
+
+  worker    Worker        @relation(fields: [workerId], references: [id])
+  project   Project       @relation(fields: [projectId], references: [id])
+
+  createdAt DateTime      @default(now())
+  @@map("attendances")
+}
+
+model GangDpr {
+  id     String            @id @default(cuid())
+  gangId String
+  dprId  String
+  share  Float
+
+  gang   Gang              @relation(fields: [gangId], references: [id])
+  dpr    DailyProgressReport @relation(fields: [dprId], references: [id])
+
+  @@unique([gangId, dprId])
+  @@map("gang_dprs")
+}
+
+model WageLine {
+  id        String      @id @default(cuid())
+  workerId  String
+  dprId     String
+  quantity  Float
+  rate      Float
+  amount    Float
+  status    WageStatus  @default(PENDING)
+
+  worker    Worker      @relation(fields: [workerId], references: [id])
+  dpr       DailyProgressReport @relation(fields: [dprId], references: [id])
+
+  @@unique([workerId, dprId])
+  @@map("wage_lines")
+}
+
+model PaymentBatch {
+  id          String   @id @default(cuid())
+  projectId   String
+  batchDate   DateTime
+  totalAmount Float
+  status      PaymentStatus @default(PENDING)
+  gatewayRef  String?
+
+  project     Project  @relation(fields: [projectId], references: [id])
+
+  createdAt   DateTime @default(now())
+  @@map("payment_batches")
+}
+
+model MaterialRequest {
+  id          String        @id @default(cuid())
+  projectId   String
+  material    String
+  quantity    Float
+  unit        String
+  status      RequestStatus @default(PENDING)
+  approvedQty Float?
+
+  project     Project       @relation(fields: [projectId], references: [id])
+
+  createdAt   DateTime      @default(now())
+  @@map("material_requests")
+}
+
+model Alert {
+  id        String        @id @default(cuid())
+  projectId String
+  type      AlertType
+  message   String
+  severity  AlertSeverity
+  resolved  Boolean       @default(false)
+
+  project   Project       @relation(fields: [projectId], references: [id])
+
+  createdAt DateTime      @default(now())
+  @@map("alerts")
+}
+
+// Enums (FIXED spacing)
+enum ProjectRole {
+  OWNER
+  ENGINEER
+  SUPERVISOR
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DprStatus {
+  PENDING
+  AI_ANALYZED
+  VERIFIED
+  APPROVED
+  REJECTED
+}
+
+enum AttendanceMode {
+  GPS
+  QR_CODE
+  MANUAL
+}
+
+enum WageStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AlertType {
+  DELAY_RISK
+  COST_OVERRUN
+  MATERIAL_SHORTAGE
+  LOW_AI_CONFIDENCE
+  NO_PROGRESS
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
